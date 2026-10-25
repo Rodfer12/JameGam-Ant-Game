@@ -10,7 +10,7 @@ config_version=5
 
 [application]
 
-config/name="JameGam"
+config/name="Silly Ant Game"
 run/main_scene="res://main_menu.tscn"
 config/features=PackedStringArray("4.7", "Forward Plus")
 config/icon="res://icon.svg"
@@ -22,7 +22,7 @@ GameState="*res://game_state.gd"
 [display]
 
 window/size/viewport_width=480
-window/size/viewport_height=270
+window/size/viewport_height=272
 window/stretch/mode="canvas_items"
 window/stretch/aspect="expand"
 
@@ -32,4 +32,5 @@ window/stretch/aspect="expand"
 
 [rendering]
 
+textures/canvas_textures/default_texture_filter=0
 rendering_device/driver.windows="d3d12"
