@@ -72,6 +72,7 @@ var powerup_choices: Array[Dictionary] = []
 var enemy_behavior_time := 0.0
 var enemy_contact_cooldown := 0.0
 var enemy_orbit_direction := 1.0
+var enemy_path_timer := 0.0
 var step_timer := 0.0
 var audio_player: AudioStreamPlayer
 
@@ -191,6 +192,7 @@ func _start_level(index: int) -> void:
 	enemy_behavior_time = 0.0
 	enemy_contact_cooldown = 0.0
 	enemy_orbit_direction = -enemy_orbit_direction
+	enemy_path_timer = 0.0
 	enemy_poison_time = 0.0
 	enemy_poison_tick = 0.0
 	poison_projectiles.clear()
@@ -259,7 +261,7 @@ func _move_enemy(delta: float) -> void:
 	if enemy_health <= 0:
 		return
 	var level: Dictionary = LEVELS[level_index]
-	var direction := enemy_position.direction_to(player_position)
+	var direction := _enemy_path_direction(delta)
 	var quirk: String = level["quirk"]
 	var movement := direction
 	if quirk == "ORBITS":
@@ -287,6 +289,50 @@ func _move_enemy(delta: float) -> void:
 			_spawn_effect(magic_texture, player_position, Color("#ff6b8a"), 1.4)
 			_play_sound(door_sound, -8.0)
 
+func _enemy_path_direction(delta: float) -> Vector2:
+	enemy_path_timer -= delta
+	if enemy_path_timer > 0.0:
+		var direct_direction := enemy_position.direction_to(player_position)
+		if not _projectile_hits_wall(enemy_position, enemy_position + direct_direction * 24.0):
+			return direct_direction
+	enemy_path_timer = 0.18
+	var start := _navigation_cell(enemy_position)
+	var target := _navigation_cell(player_position)
+	if start == target:
+		return enemy_position.direction_to(player_position)
+	var queue: Array[Vector2i] = [start]
+	var came_from: Dictionary = {start: start}
+	var found := false
+	while not queue.is_empty():
+		var current: Vector2i = queue.pop_front()
+		if current == target:
+			found = true
+			break
+		for offset in [Vector2i.LEFT, Vector2i.RIGHT, Vector2i.UP, Vector2i.DOWN]:
+			var next: Vector2i = current + offset
+			if next in came_from:
+				continue
+			var next_position := _navigation_position(next)
+			if _hits_wall(next_position, 10.0):
+				continue
+			came_from[next] = current
+			queue.append(next)
+	if not found:
+		return enemy_position.direction_to(player_position)
+	var waypoint := target
+	while came_from[waypoint] != start:
+		waypoint = came_from[waypoint]
+	return enemy_position.direction_to(_navigation_position(waypoint))
+
+func _navigation_cell(position: Vector2) -> Vector2i:
+	return Vector2i(
+		clampi(floori(position.x / 16.0), 1, 28),
+		clampi(floori(position.y / 16.0), 2, 15)
+	)
+
+func _navigation_position(cell: Vector2i) -> Vector2:
+	return Vector2(cell.x * 16.0 + 8.0, cell.y * 16.0 + 8.0)
+
 func _attack() -> void:
 	if attack_cooldown > 0.0 or enemy_health <= 0:
 		return
@@ -303,9 +349,14 @@ func _attack() -> void:
 func _update_poison_projectiles(delta: float) -> void:
 	var remaining: Array[Dictionary] = []
 	for projectile in poison_projectiles:
-		projectile["position"] = projectile["position"] + projectile["velocity"] * delta
+		var previous_position: Vector2 = projectile["position"]
+		var next_position: Vector2 = previous_position + projectile["velocity"] * delta
 		projectile["life"] = float(projectile["life"]) - delta
-		if enemy_health > 0 and projectile["position"].distance_to(enemy_position) < 24.0:
+		if _projectile_hits_wall(previous_position, next_position):
+			_spawn_effect(spark_texture, next_position, Color("#8ba4b8"), 0.45)
+			continue
+		projectile["position"] = next_position
+		if enemy_health > 0 and next_position.distance_to(enemy_position) < 24.0:
 			enemy_poison_time = get_node("/root/GameState").poison_duration
 			enemy_poison_tick = 0.0
 			enemy_flash = 0.12
@@ -315,6 +366,15 @@ func _update_poison_projectiles(delta: float) -> void:
 		if float(projectile["life"]) > 0.0:
 			remaining.append(projectile)
 	poison_projectiles = remaining
+
+func _projectile_hits_wall(start: Vector2, end: Vector2) -> bool:
+	var distance := start.distance_to(end)
+	var steps := maxi(1, ceili(distance / 4.0))
+	for step in range(1, steps + 1):
+		var point := start.lerp(end, float(step) / float(steps))
+		if _hits_wall(point, 2.0):
+			return true
+	return false
 
 func _check_exit() -> void:
 	var exit_rect := Rect2(ROOM_SIZE.x - 42.0, ROOM_SIZE.y / 2.0 - 24.0, 24.0, 48.0)
@@ -380,19 +440,34 @@ func _draw() -> void:
 func _draw_room_background() -> void:
 	draw_rect(Rect2(Vector2.ZERO, ROOM_SIZE), Color("#17131c"), true)
 	var floor_texture := brown_floor_texture if level_index < 2 else gray_floor_texture
-	var floor_source := Rect2(64, 64, 16, 16)
+	var floor_source := Rect2(16, 48, 16, 16)
 	for x in range(1, 29):
 		for y in range(2, 16):
 			draw_texture_rect_region(floor_texture, Rect2(x * 16, y * 16, 16, 16), floor_source)
-	var floor_tint: Color = [
-		Color("#b78162", 0.22),
-		Color("#6ca56f", 0.25),
-		Color("#6689bf", 0.25),
-		Color("#a34e67", 0.28)
-	][level_index]
-	draw_rect(Rect2(16, 32, 448, 208), floor_tint, true)
+	_draw_tunnel_shadows()
 	_draw_room_walls()
 	_draw_room_landmarks()
+
+func _draw_tunnel_shadows() -> void:
+	var shadow := Color("#261923", 0.72) if level_index == 3 else Color("#30201d", 0.58)
+	match level_index:
+		0:
+			draw_rect(Rect2(176, 80, 16, 96), shadow, true)
+			draw_rect(Rect2(288, 80, 16, 96), shadow, true)
+			draw_circle(Vector2(240, 136), 26.0, shadow)
+		1:
+			for wall in [Rect2(96, 48, 16, 80), Rect2(96, 176, 16, 48), Rect2(224, 48, 16, 96), Rect2(224, 192, 16, 32), Rect2(352, 48, 16, 48), Rect2(352, 144, 16, 80)]:
+				draw_rect(wall, shadow, true)
+		2:
+			draw_rect(Rect2(144, 80, 192, 16), shadow, true)
+			draw_rect(Rect2(144, 176, 192, 16), shadow, true)
+			draw_rect(Rect2(144, 80, 16, 112), shadow, true)
+			draw_rect(Rect2(320, 80, 16, 112), shadow, true)
+		3:
+			draw_rect(Rect2(192, 64, 96, 16), shadow, true)
+			draw_rect(Rect2(192, 192, 96, 16), shadow, true)
+			draw_rect(Rect2(192, 64, 16, 144), shadow, true)
+			draw_rect(Rect2(272, 64, 16, 144), shadow, true)
 
 func _room_walls() -> Array[Rect2]:
 	match level_index:
@@ -432,12 +507,14 @@ func _room_walls() -> Array[Rect2]:
 			]
 
 func _draw_room_walls() -> void:
-	var wall_dark: Array[Color] = [Color("#4b2d26"), Color("#254a35"), Color("#293a64"), Color("#4d2138")]
-	var wall_light: Array[Color] = [Color("#b87858"), Color("#6eb77b"), Color("#81b9e5"), Color("#d46b83")]
+	var wall_texture := brown_floor_texture if level_index < 2 else gray_floor_texture
+	var horizontal_source := Rect2(32, 176, 16, 16)
+	var vertical_source := Rect2(48, 208, 16, 16)
 	for wall in _room_walls():
-		draw_rect(wall, wall_dark[level_index], true)
-		draw_line(wall.position + Vector2(2, 2), wall.position + Vector2(wall.size.x - 2, 2), wall_light[level_index], 3.0)
-		draw_line(wall.position + Vector2(2, wall.size.y - 2), wall.position + Vector2(wall.size.x - 2, wall.size.y - 2), Color(wall_dark[level_index], 0.7), 2.0)
+		var source := horizontal_source if wall.size.x > wall.size.y else vertical_source
+		for x in range(int(wall.position.x), int(wall.end.x), 16):
+			for y in range(int(wall.position.y), int(wall.end.y), 16):
+				draw_texture_rect_region(wall_texture, Rect2(x, y, 16, 16), source)
 
 func _draw_room_landmarks() -> void:
 	match level_index:
