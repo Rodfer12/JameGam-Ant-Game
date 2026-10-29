@@ -1,3 +1,9 @@
 # Godot 4+ specific ignores
 .godot/
 /android/
+*.import
+*.uid
+SillyAntGame*.exe
+SillyAntGame*.pck
+SillyAntGame*.zip
+mcp*.json

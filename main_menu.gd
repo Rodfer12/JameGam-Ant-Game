@@ -87,22 +87,26 @@ func _draw() -> void:
 		_draw_main_menu()
 
 func _draw_main_menu() -> void:
-	draw_string(menu_font, Vector2(0, 43), "SILLY ANT GAME", HORIZONTAL_ALIGNMENT_CENTER, 480, 27, Color("#fff0a6"))
-	draw_string(menu_font, Vector2(0, 62), "This is rlly bad but I wanna make it better", HORIZONTAL_ALIGNMENT_CENTER, 480, 10, Color("#d7ffc0"))
+	_draw_title_emblem(Vector2(240, 32))
+	draw_string(menu_font, Vector2(0, 66), "SILLY ANT GAME", HORIZONTAL_ALIGNMENT_CENTER, 480, 25, Color("#fff0a6"))
+	draw_string(menu_font, Vector2(0, 82), "A tiny adventure beneath the garden", HORIZONTAL_ALIGNMENT_CENTER, 480, 10, Color("#d7ffc0"))
+	draw_line(Vector2(130, 96), Vector2(350, 96), Color("#f4d9ad", 0.45), 1.0)
 	for index in MENU_ITEMS.size():
-		var y := 128.0 + index * 29.0
+		var y := 130.0 + index * 32.0
 		var selected := index == menu_index
 		if selected:
-			draw_rect(Rect2(145, y - 17, 190, 24), Color("#4d3650"), true)
-			draw_string(menu_font, Vector2(0, y), "> " + MENU_ITEMS[index] + " <", HORIZONTAL_ALIGNMENT_CENTER, 480, 13, Color("#f4d9ad"))
+			draw_rect(Rect2(132, y - 19, 216, 27), Color("#4d3650", 0.92), true)
+			draw_rect(Rect2(132, y - 19, 216, 27), Color("#f4d9ad", 0.75), false, 1.0)
+			draw_string(menu_font, Vector2(0, y), "›  " + MENU_ITEMS[index] + "  ‹", HORIZONTAL_ALIGNMENT_CENTER, 480, 13, Color("#fff0c2"))
 		else:
-			draw_string(menu_font, Vector2(0, y), MENU_ITEMS[index], HORIZONTAL_ALIGNMENT_CENTER, 480, 12, Color("#b99bbd"))
-	draw_string(menu_font, Vector2(0, 238), "UP / DOWN select     ENTER confirm", HORIZONTAL_ALIGNMENT_CENTER, 480, 10, Color("#f4d9ad"))
-	draw_string(menu_font, Vector2(0, 253), "I have absolutely 0 experience in game making lmao", HORIZONTAL_ALIGNMENT_CENTER, 480, 9, Color("#d7ffc0"))
+			draw_string(menu_font, Vector2(0, y), MENU_ITEMS[index], HORIZONTAL_ALIGNMENT_CENTER, 480, 12, Color("#c7accb"))
+	draw_string(menu_font, Vector2(0, 238), "↑ ↓  SELECT       ENTER  CONFIRM", HORIZONTAL_ALIGNMENT_CENTER, 480, 10, Color("#f4d9ad"))
+	draw_string(menu_font, Vector2(0, 255), "Explore the chambers. Survive the nest.", HORIZONTAL_ALIGNMENT_CENTER, 480, 9, Color("#d7ffc0"))
 
 func _draw_ant_selection() -> void:
-	draw_string(menu_font, Vector2(0, 42), " PICK YOUR ANT", HORIZONTAL_ALIGNMENT_CENTER, 480, 19, Color("#fff0a6"))
-	draw_string(menu_font, Vector2(0, 61), "in a later version they'll have attributes. Idrk how to do that rn. I'm new to this.", HORIZONTAL_ALIGNMENT_CENTER, 480, 10, Color("#d7ffc0"))
+	_draw_title_emblem(Vector2(240, 28))
+	draw_string(menu_font, Vector2(0, 57), "CHOOSE YOUR ANT", HORIZONTAL_ALIGNMENT_CENTER, 480, 19, Color("#fff0a6"))
+	draw_string(menu_font, Vector2(0, 73), "Each color brings its own attitude to the colony.", HORIZONTAL_ALIGNMENT_CENTER, 480, 10, Color("#d7ffc0"))
 	for index in ANT_COLORS.size():
 		var ant_color: Dictionary = ANT_COLORS[index]
 		var center := Vector2(84.0 + index * 104.0, 124.0)
@@ -112,8 +116,8 @@ func _draw_ant_selection() -> void:
 		_draw_sprite(center, ant_color["column"] + 1)
 		draw_string(menu_font, center + Vector2(-9, 29), str(index + 1), HORIZONTAL_ALIGNMENT_LEFT, -1, 12, Color("#f4d9ad"))
 		draw_string(menu_font, center + Vector2(-32, 53), ant_color["name"], HORIZONTAL_ALIGNMENT_CENTER, 64, 9, Color("#b99bbd"))
-	draw_string(menu_font, Vector2(0, 222), "1-4 choose     ENTER unleash the ant", HORIZONTAL_ALIGNMENT_CENTER, 480, 10, Color("#fff0a6"))
-	draw_string(menu_font, Vector2(0, 241), "ESC = chicken out and go back", HORIZONTAL_ALIGNMENT_CENTER, 480, 9, Color("#d7ffc0"))
+	draw_string(menu_font, Vector2(0, 222), "1-4  CHOOSE       ENTER  UNLEASH", HORIZONTAL_ALIGNMENT_CENTER, 480, 10, Color("#fff0a6"))
+	draw_string(menu_font, Vector2(0, 241), "ESC  RETURN TO MENU", HORIZONTAL_ALIGNMENT_CENTER, 480, 9, Color("#d7ffc0"))
 
 func _draw_credits() -> void:
 	draw_string(menu_font, Vector2(0, 35), "CREDITS", HORIZONTAL_ALIGNMENT_CENTER, 480, 22, Color("#f4d9ad"))
@@ -146,6 +150,17 @@ func _draw_ui_background() -> void:
 	draw_rect(Rect2(Vector2.ZERO, ROOM_SIZE), Color("#263c2c"))
 	draw_texture_rect(ant_hill_background, Rect2(0, 22, ROOM_SIZE.x, 240), false, Color(1.0, 1.0, 1.0, 0.62))
 	draw_rect(Rect2(Vector2.ZERO, ROOM_SIZE), Color("#17131c", 0.48))
+	draw_rect(Rect2(10, 10, 460, 252), Color("#f4d9ad", 0.16), false, 2.0)
+	draw_circle(Vector2(28, 28), 2.0, Color("#fff0a6", 0.8))
+	draw_circle(Vector2(452, 42), 1.5, Color("#d7ffc0", 0.75))
+	draw_circle(Vector2(426, 238), 2.0, Color("#fff0a6", 0.65))
+
+func _draw_title_emblem(center: Vector2) -> void:
+	draw_circle(center, 16.0, Color("#4d3650", 0.9))
+	draw_arc(center, 16.0, 0.0, TAU, 24, Color("#f4d9ad", 0.75), 1.0)
+	draw_circle(center + Vector2(-5, -2), 3.0, Color("#8bf08b"))
+	draw_circle(center + Vector2(5, -2), 3.0, Color("#8bf08b"))
+	draw_line(center + Vector2(-8, 8), center + Vector2(8, 8), Color("#fff0c2"), 2.0)
 
 func _draw_sprite(center: Vector2, column: int) -> void:
 	var source := Rect2(Vector2(column, 0) * SPRITE_CELL_SIZE, SPRITE_CELL_SIZE)

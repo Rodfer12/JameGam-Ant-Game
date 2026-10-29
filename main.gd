@@ -23,16 +23,24 @@ const ANT_COLORS := [
 ]
 
 const LEVELS := [
-	{"name": "FIRST CHAMBER", "subtitle": "A quiet entrance", "enemy": "SCOUT", "quirk": "DASHES", "health": 5, "speed": 58.0, "color": "#5a382b"},
+	{"name": "ROOTBOUND ENTRY", "subtitle": "Find a way through", "enemy": "SCOUT", "quirk": "DASHES", "health": 5, "speed": 58.0, "color": "#5a382b"},
 	{"name": "FUNGUS GALLERY", "subtitle": "The spores are moving", "enemy": "STALKER", "quirk": "ORBITS", "health": 7, "speed": 62.0, "color": "#3b4b38"},
 	{"name": "CRYSTAL DESCENT", "subtitle": "No light reaches here", "enemy": "HUNTER", "quirk": "SIDESTEPS", "health": 9, "speed": 70.0, "color": "#303c5b"},
-	{"name": "THE QUEEN'S NEST", "subtitle": "Face the colony's ruler", "enemy": "QUEEN", "quirk": "ENRAGES", "health": 16, "speed": 46.0, "color": "#5c293f"}
+	{"name": "OLD NURSERY", "subtitle": "Something is guarding the eggs", "enemy": "GUARD", "quirk": "SIDESTEPS", "health": 10, "speed": 56.0, "color": "#4b3b57"},
+	{"name": "SCARLET VEIN", "subtitle": "The colony runs deep", "enemy": "STALKER", "quirk": "ORBITS", "health": 12, "speed": 66.0, "color": "#5b3038"},
+	{"name": "CRYSTAL WARREN", "subtitle": "The walls are listening", "enemy": "HUNTER", "quirk": "SIDESTEPS", "health": 13, "speed": 70.0, "color": "#303c5b"},
+	{"name": "MUSHROOM GROTTO", "subtitle": "Spores hide the patrols", "enemy": "STALKER", "quirk": "ORBITS", "health": 14, "speed": 62.0, "color": "#3b4b38"},
+	{"name": "OLD NURSERY", "subtitle": "Protect the next generation", "enemy": "GUARD", "quirk": "SIDESTEPS", "health": 15, "speed": 56.0, "color": "#4b3b57"},
+	{"name": "QUEEN'S ANTECHAMBER", "subtitle": "The royal guard waits", "enemy": "GUARD", "quirk": "DASHES", "health": 17, "speed": 60.0, "color": "#5b3038"},
+	{"name": "THE QUEEN'S NEST", "subtitle": "Face the colony's ruler", "enemy": "QUEEN", "quirk": "ENRAGES", "health": 22, "speed": 46.0, "color": "#5c293f"}
 ]
 
 var ant_texture: Texture2D = preload("res://art/Ants.png")
 var bug_texture: Texture2D = preload("res://art/Bugs.png")
 var brown_floor_texture: Texture2D = preload("res://art/Cave Tileset/Cave Tileset/Brown_Tile_Terrain (16 x 16).png")
 var gray_floor_texture: Texture2D = preload("res://art/Cave Tileset/Cave Tileset/Gray_Tile_Terrain (16 x 16).png")
+var cave_background_texture: Texture2D = preload("res://art/Cave Tileset/Cave Tileset/_Complete_static_BG_(288 x 208).png")
+var scaffolding_texture: Texture2D = preload("res://art/Cave Tileset/Cave Tileset/Scaffolding_and_BG_Parts (16 x 16).png")
 var slash_texture: Texture2D = preload("res://sfx/kenney-particle-pack-7e801dc538996622a91327bb1dd5879cf977aa09/kenney-particle-pack-7e801dc538996622a91327bb1dd5879cf977aa09/addons/kenney_particle_pack/slash_01.png")
 var spark_texture: Texture2D = preload("res://sfx/kenney-particle-pack-7e801dc538996622a91327bb1dd5879cf977aa09/kenney-particle-pack-7e801dc538996622a91327bb1dd5879cf977aa09/addons/kenney_particle_pack/spark_01.png")
 var magic_texture: Texture2D = preload("res://sfx/kenney-particle-pack-7e801dc538996622a91327bb1dd5879cf977aa09/kenney-particle-pack-7e801dc538996622a91327bb1dd5879cf977aa09/addons/kenney_particle_pack/magic_01.png")
@@ -75,23 +83,38 @@ var enemy_orbit_direction := 1.0
 var enemy_path_timer := 0.0
 var step_timer := 0.0
 var audio_player: AudioStreamPlayer
+var room_entry_direction := 0
+var room_enemy_health: Array[int] = []
+var cleared_rooms: Array[bool] = []
+var previous_player_position := Vector2.ZERO
+var death_menu_layer: CanvasLayer
+var death_menu: Control
+@onready var torch_light: PointLight2D = $PlayerTorch
+@onready var camera: Camera2D = $Camera2D
+var torch_flicker_time := 0.0
 
 func _ready() -> void:
-	if not Engine.is_editor_hint():
-		selected_ant = get_node("/root/GameState").selected_ant
-		demo_mode = get_node("/root/GameState").demo_mode
-		player_max_health = get_node("/root/GameState").max_health
-		player_health = player_max_health
-	_start_level(0)
+	if Engine.is_editor_hint():
+		return
+	selected_ant = get_node("/root/GameState").selected_ant
+	demo_mode = get_node("/root/GameState").demo_mode
+	player_max_health = get_node("/root/GameState").max_health
+	player_health = player_max_health
 	_populate_background_tile_map()
-	$BackgroundTileMap.visible = false
+	_initialize_room_state()
+	_start_level(0)
+	camera.position = player_position
+	$BackgroundTileMap.visible = true
 	audio_player = AudioStreamPlayer.new()
 	add_child(audio_player)
+	_create_death_menu()
 	queue_redraw()
 
 func _process(delta: float) -> void:
 	if Engine.is_editor_hint():
 		return
+	_update_torch_light(delta)
+	camera.position = player_position
 	if choosing_powerup:
 		queue_redraw()
 		return
@@ -123,9 +146,12 @@ func _process(delta: float) -> void:
 	if enemy_poison_time > 0.0 and enemy_poison_tick <= 0.0 and enemy_health > 0:
 		enemy_poison_tick = POISON_TICK_RATE
 		enemy_health -= get_node("/root/GameState").poison_damage
+		room_enemy_health[level_index] = enemy_health
 		_spawn_effect(spark_texture, enemy_position, Color("#8bf08b"), 0.8)
 		_play_sound(hit_sound, -8.0)
 		if enemy_health <= 0:
+			room_enemy_health[level_index] = 0
+			cleared_rooms[level_index] = true
 			_spawn_effect(magic_texture, enemy_position, Color("#8bf08b"), 1.8)
 	player_anim_time += delta
 	enemy_anim_time += delta
@@ -134,8 +160,19 @@ func _process(delta: float) -> void:
 	_check_exit()
 	queue_redraw()
 
+func _update_torch_light(delta: float) -> void:
+	torch_flicker_time += delta
+	torch_light.position = player_position
+	var slow_wave := sin(torch_flicker_time * 7.3) * 0.055
+	var fast_wave := sin(torch_flicker_time * 19.0 + 1.7) * 0.025
+	var irregular_pulse := sin(torch_flicker_time * 2.1 + sin(torch_flicker_time * 0.8)) * 0.035
+	torch_light.energy = clampf(0.82 + slow_wave + fast_wave + irregular_pulse, 0.68, 0.98)
+	torch_light.texture_scale = 1.05 + (torch_light.energy - 0.82) * 0.22
+
 func _input(event: InputEvent) -> void:
 	if event is InputEventKey and event.pressed and not event.echo:
+		if game_over:
+			return
 		if paused:
 			_handle_pause_input(event.keycode)
 			return
@@ -184,9 +221,9 @@ func _handle_pause_input(keycode: Key) -> void:
 func _start_level(index: int) -> void:
 	level_index = clampi(index, 0, LEVELS.size() - 1)
 	var level: Dictionary = LEVELS[level_index]
-	player_position = Vector2(72.0, ROOM_SIZE.y / 2.0)
-	enemy_position = Vector2(350.0, ROOM_SIZE.y / 2.0)
-	enemy_health = level["health"]
+	player_position = $BackgroundTileMap.world_center($BackgroundTileMap.get_rooms()[level_index])
+	enemy_position = $BackgroundTileMap.world_center($BackgroundTileMap.get_rooms()[level_index]) + Vector2(88.0, 0.0)
+	enemy_health = room_enemy_health[level_index]
 	choosing_powerup = false
 	powerup_choices.clear()
 	enemy_behavior_time = 0.0
@@ -196,7 +233,7 @@ func _start_level(index: int) -> void:
 	enemy_poison_time = 0.0
 	enemy_poison_tick = 0.0
 	poison_projectiles.clear()
-	transition_time = 0.8
+	transition_time = 0.0
 	attack_cooldown = 0.0
 	attack_flash = 0.0
 	enemy_flash = 0.0
@@ -207,6 +244,7 @@ func _start_level(index: int) -> void:
 
 func _restart_run() -> void:
 	get_node("/root/GameState").reset_run()
+	_initialize_room_state()
 	player_health = MAX_HEALTH
 	player_max_health = MAX_HEALTH
 	run_complete = false
@@ -215,15 +253,95 @@ func _restart_run() -> void:
 	paused = false
 	_start_level(0)
 
+func _initialize_room_state() -> void:
+	room_enemy_health.clear()
+	cleared_rooms.clear()
+	for level in LEVELS:
+		room_enemy_health.append(int(level["health"]))
+		cleared_rooms.append(false)
+
+func _create_death_menu() -> void:
+	death_menu_layer = CanvasLayer.new()
+	death_menu_layer.name = "DeathMenuLayer"
+	death_menu_layer.process_mode = Node.PROCESS_MODE_ALWAYS
+	death_menu_layer.layer = 20
+	add_child(death_menu_layer)
+	death_menu = Control.new()
+	death_menu.name = "DeathMenu"
+	death_menu.set_anchors_and_offsets_preset(Control.PRESET_FULL_RECT)
+	death_menu.mouse_filter = Control.MOUSE_FILTER_STOP
+	death_menu.process_mode = Node.PROCESS_MODE_ALWAYS
+	death_menu.visible = false
+	death_menu_layer.add_child(death_menu)
+	var shade := ColorRect.new()
+	shade.color = Color("#0d1018", 0.82)
+	shade.set_anchors_and_offsets_preset(Control.PRESET_FULL_RECT)
+	death_menu.add_child(shade)
+	var panel := Panel.new()
+	panel.name = "DeathPanel"
+	panel.position = Vector2(62, 38)
+	panel.size = Vector2(356, 196)
+	var panel_style := StyleBoxFlat.new()
+	panel_style.bg_color = Color("#211a2a", 0.98)
+	panel_style.border_color = Color("#d85b7d")
+	panel_style.set_border_width_all(2)
+	panel.add_theme_stylebox_override("panel", panel_style)
+	death_menu.add_child(panel)
+	var title := Label.new()
+	title.text = "COLONY LOST"
+	title.position = Vector2(0, 25)
+	title.size = Vector2(356, 32)
+	title.horizontal_alignment = HORIZONTAL_ALIGNMENT_CENTER
+	title.add_theme_font_size_override("font_size", 22)
+	title.add_theme_color_override("font_color", Color("#ff9a9f"))
+	panel.add_child(title)
+	var subtitle := Label.new()
+	subtitle.text = "THE GUARD REACHED YOUR NEST"
+	subtitle.position = Vector2(0, 62)
+	subtitle.size = Vector2(356, 20)
+	subtitle.horizontal_alignment = HORIZONTAL_ALIGNMENT_CENTER
+	subtitle.add_theme_font_size_override("font_size", 9)
+	subtitle.add_theme_color_override("font_color", Color("#f4d9ad"))
+	panel.add_child(subtitle)
+	var restart := Button.new()
+	restart.name = "RestartButton"
+	restart.text = "RESTART RUN"
+	restart.position = Vector2(78, 118)
+	restart.size = Vector2(200, 28)
+	restart.focus_mode = Control.FOCUS_ALL
+	restart.pressed.connect(_restart_from_death_menu)
+	panel.add_child(restart)
+	var menu_button := Button.new()
+	menu_button.name = "MainMenuButton"
+	menu_button.text = "MAIN MENU"
+	menu_button.position = Vector2(78, 153)
+	menu_button.size = Vector2(200, 28)
+	menu_button.focus_mode = Control.FOCUS_ALL
+	menu_button.pressed.connect(_return_from_death_menu)
+	panel.add_child(menu_button)
+	restart.grab_focus()
+
+func _show_death_menu() -> void:
+	if death_menu != null:
+		death_menu.visible = true
+		get_tree().paused = true
+
+func _restart_from_death_menu() -> void:
+	get_tree().paused = false
+	death_menu.visible = false
+	_restart_run()
+	enemy_contact_cooldown = 1.0
+	player_health = player_max_health
+
+func _return_from_death_menu() -> void:
+	get_tree().paused = false
+	get_tree().change_scene_to_file("res://main_menu.tscn")
+
 func _populate_background_tile_map() -> void:
-	var tile_map: TileMapLayer = $BackgroundTileMap
-	tile_map.clear()
-	tile_map.position = Vector2.ZERO
-	for x in range(30):
-		for y in range(17):
-			tile_map.set_cell(Vector2i(x, y), 0, Vector2i(4, 4))
+	$BackgroundTileMap.generate(1337)
 
 func _move_player(delta: float) -> void:
+	previous_player_position = player_position
 	var movement := Input.get_vector("ui_left", "ui_right", "ui_up", "ui_down")
 	movement += Vector2(
 		float(Input.is_key_pressed(KEY_D)) - float(Input.is_key_pressed(KEY_A)),
@@ -238,8 +356,13 @@ func _move_player(delta: float) -> void:
 		if step_timer <= 0.0:
 			step_timer = 0.18
 			_play_sound(footstep_sound, -12.0)
-	player_position.x = clampf(player_position.x, ROOM_MARGIN + 14.0, ROOM_SIZE.x - ROOM_MARGIN - 14.0)
-	player_position.y = clampf(player_position.y, ROOM_MARGIN + 14.0, ROOM_SIZE.y - ROOM_MARGIN - 14.0)
+	var entered_room: int = $BackgroundTileMap.room_index_at_world(player_position)
+	if entered_room == -1 and not cleared_rooms[level_index]:
+		player_position = previous_player_position
+	elif entered_room >= 0 and entered_room != level_index and not cleared_rooms[level_index]:
+		player_position = previous_player_position
+	else:
+		_check_room_transition()
 
 func _move_with_walls(position: Vector2, movement: Vector2, radius: float) -> Vector2:
 	var result := position
@@ -252,10 +375,7 @@ func _move_with_walls(position: Vector2, movement: Vector2, radius: float) -> Ve
 	return result
 
 func _hits_wall(position: Vector2, radius: float) -> bool:
-	for wall in _room_walls():
-		if wall.grow(radius).has_point(position):
-			return true
-	return false
+	return $BackgroundTileMap.is_wall_at_world(position, radius)
 
 func _move_enemy(delta: float) -> void:
 	if enemy_health <= 0:
@@ -275,8 +395,6 @@ func _move_enemy(delta: float) -> void:
 	var previous_enemy_position := enemy_position
 	enemy_position += movement * level["speed"] * delta
 	enemy_position = _move_with_walls(previous_enemy_position, enemy_position - previous_enemy_position, 11.0)
-	enemy_position.x = clampf(enemy_position.x, ROOM_MARGIN + 14.0, ROOM_SIZE.x - ROOM_MARGIN - 14.0)
-	enemy_position.y = clampf(enemy_position.y, ROOM_MARGIN + 14.0, ROOM_SIZE.y - ROOM_MARGIN - 14.0)
 	if enemy_position.distance_to(player_position) < 19.0 and enemy_contact_cooldown <= 0.0:
 		enemy_contact_cooldown = 0.85
 		player_health -= 1
@@ -286,6 +404,7 @@ func _move_enemy(delta: float) -> void:
 		if player_health <= 0:
 			game_over = true
 			death_animation_time = 0.0
+			_show_death_menu()
 			_spawn_effect(magic_texture, player_position, Color("#ff6b8a"), 1.4)
 			_play_sound(door_sound, -8.0)
 
@@ -310,6 +429,8 @@ func _enemy_path_direction(delta: float) -> Vector2:
 			break
 		for offset in [Vector2i.LEFT, Vector2i.RIGHT, Vector2i.UP, Vector2i.DOWN]:
 			var next: Vector2i = current + offset
+			if next.x < 1 or next.x > 28 or next.y < 2 or next.y > 15:
+				continue
 			if next in came_from:
 				continue
 			var next_position := _navigation_position(next)
@@ -320,8 +441,12 @@ func _enemy_path_direction(delta: float) -> Vector2:
 	if not found:
 		return enemy_position.direction_to(player_position)
 	var waypoint := target
-	while came_from[waypoint] != start:
+	var path_steps := 0
+	while came_from.has(waypoint) and came_from[waypoint] != start and path_steps < 64:
 		waypoint = came_from[waypoint]
+		path_steps += 1
+	if not came_from.has(waypoint):
+		return enemy_position.direction_to(player_position)
 	return enemy_position.direction_to(_navigation_position(waypoint))
 
 func _navigation_cell(position: Vector2) -> Vector2i:
@@ -377,8 +502,22 @@ func _projectile_hits_wall(start: Vector2, end: Vector2) -> bool:
 	return false
 
 func _check_exit() -> void:
-	var exit_rect := Rect2(ROOM_SIZE.x - 42.0, ROOM_SIZE.y / 2.0 - 24.0, 24.0, 48.0)
-	if enemy_health <= 0 and exit_rect.has_point(player_position):
+	if enemy_health <= 0:
+		_check_room_transition()
+
+func _check_room_transition() -> void:
+	var entered_room: int = $BackgroundTileMap.room_index_at_world(player_position)
+	if entered_room < 0 or entered_room == level_index:
+		return
+	if enemy_health <= 0:
+		cleared_rooms[level_index] = true
+	level_index = entered_room
+	enemy_position = $BackgroundTileMap.world_center($BackgroundTileMap.get_rooms()[level_index]) + Vector2(88.0, 0.0)
+	enemy_health = 0 if cleared_rooms[level_index] else LEVELS[level_index]["health"]
+	enemy_behavior_time = 0.0
+	enemy_path_timer = 0.0
+	enemy_contact_cooldown = 0.0
+	if level_index == LEVELS.size() - 1 and enemy_health <= 0:
 		_open_powerups()
 
 func _open_powerups() -> void:
@@ -414,39 +553,32 @@ func _choose_powerup(index: int) -> void:
 		run_complete = true
 		_spawn_effect(magic_texture, enemy_position, Color("#f6c85f"), 2.3)
 		_play_sound(door_sound)
-	else:
-		_start_level(level_index + 1)
 
 func _draw() -> void:
 	_draw_room_background()
-	_draw_exit()
 	_draw_enemy()
 	_draw_player()
 	_draw_effects()
 	_draw_poison_projectiles()
+	var camera_offset := camera.position - Vector2(240.0, 136.0)
+	draw_set_transform(camera_offset)
 	_draw_hud()
 	if choosing_powerup:
 		_draw_powerup_menu()
 	elif paused:
 		_draw_pause_menu()
 	elif game_over:
-		_draw_state_overlay(Color("#d85b7d", 0.7))
+		pass
 	elif run_complete:
 		_draw_state_overlay(Color("#f6c85f", 0.7))
 	elif transition_time > 0.0:
 		draw_rect(Rect2(0, 0, ROOM_SIZE.x, ROOM_SIZE.y), Color("#17131c", 0.82), true)
 		draw_circle(Vector2(ROOM_SIZE.x / 2.0, ROOM_SIZE.y / 2.0), 26.0 + sin(transition_time * 12.0) * 5.0, Color("#a98cff", 0.5))
+	draw_set_transform(Vector2.ZERO)
 
 func _draw_room_background() -> void:
-	draw_rect(Rect2(Vector2.ZERO, ROOM_SIZE), Color("#17131c"), true)
-	var floor_texture := brown_floor_texture if level_index < 2 else gray_floor_texture
-	var floor_source := Rect2(16, 48, 16, 16)
-	for x in range(1, 29):
-		for y in range(2, 16):
-			draw_texture_rect_region(floor_texture, Rect2(x * 16, y * 16, 16, 16), floor_source)
-	_draw_tunnel_shadows()
-	_draw_room_walls()
-	_draw_room_landmarks()
+	if level_index >= 4:
+		draw_texture_rect(cave_background_texture, Rect2(player_position - Vector2(144.0, 104.0), Vector2(288.0, 208.0)), false, Color(1.0, 1.0, 1.0, 0.12))
 
 func _draw_tunnel_shadows() -> void:
 	var shadow := Color("#261923", 0.72) if level_index == 3 else Color("#30201d", 0.58)
@@ -468,6 +600,12 @@ func _draw_tunnel_shadows() -> void:
 			draw_rect(Rect2(192, 192, 96, 16), shadow, true)
 			draw_rect(Rect2(192, 64, 16, 144), shadow, true)
 			draw_rect(Rect2(272, 64, 16, 144), shadow, true)
+		4:
+			draw_rect(Rect2(80, 80, 80, 96), shadow, true)
+			draw_rect(Rect2(320, 80, 80, 96), shadow, true)
+			draw_circle(Vector2(240, 136), 35.0, shadow)
+		5:
+			draw_circle(Vector2(240, 136), 56.0, shadow)
 
 func _room_walls() -> Array[Rect2]:
 	match level_index:
@@ -507,14 +645,7 @@ func _room_walls() -> Array[Rect2]:
 			]
 
 func _draw_room_walls() -> void:
-	var wall_texture := brown_floor_texture if level_index < 2 else gray_floor_texture
-	var horizontal_source := Rect2(32, 176, 16, 16)
-	var vertical_source := Rect2(48, 208, 16, 16)
-	for wall in _room_walls():
-		var source := horizontal_source if wall.size.x > wall.size.y else vertical_source
-		for x in range(int(wall.position.x), int(wall.end.x), 16):
-			for y in range(int(wall.position.y), int(wall.end.y), 16):
-				draw_texture_rect_region(wall_texture, Rect2(x, y, 16, 16), source)
+	pass
 
 func _draw_room_landmarks() -> void:
 	match level_index:
@@ -537,6 +668,18 @@ func _draw_room_landmarks() -> void:
 			draw_arc(Vector2(240, 136), 48.0, 0.0, TAU, 32, Color("#d15b6b"), 4.0)
 			for point in [Vector2(128, 72), Vector2(352, 72), Vector2(128, 200), Vector2(352, 200)]:
 				_draw_ellipse(point, Vector2(8, 11), Color("#c96b76"))
+		4:
+			for point in [Vector2(72, 72), Vector2(408, 72), Vector2(72, 200), Vector2(408, 200)]:
+				_draw_rock(point, 11.0, Color("#8a4c55"))
+			_draw_lantern(Vector2(240, 72), Color("#f6c85f"))
+			_draw_lantern(Vector2(240, 200), Color("#f6c85f"))
+			draw_circle(Vector2(240, 136), 28.0, Color("#7d4759"))
+			draw_arc(Vector2(240, 136), 28.0, 0.0, TAU, 24, Color("#d58b9b"), 3.0)
+		5:
+			draw_circle(Vector2(240, 136), 48.0, Color("#411d31"))
+			draw_arc(Vector2(240, 136), 48.0, 0.0, TAU, 32, Color("#f06b77"), 4.0)
+			for point in [Vector2(104, 76), Vector2(376, 76), Vector2(104, 196), Vector2(376, 196)]:
+				_draw_crystal(point, Color("#d15b6b"), 14.0)
 
 func _draw_chamber_background() -> void:
 	draw_rect(Rect2(ROOM_MARGIN, ROOM_MARGIN, 444, 236), Color("#5b382b"), true)
@@ -656,14 +799,23 @@ func _draw_ellipse(center: Vector2, radius: Vector2, color: Color) -> void:
 	draw_colored_polygon(points, color)
 
 func _draw_exit() -> void:
-	var exit_rect := Rect2(ROOM_SIZE.x - 42.0, ROOM_SIZE.y / 2.0 - 24.0, 24.0, 48.0)
 	var color := Color("#4caf72") if enemy_health <= 0 else Color("#49394f")
-	draw_rect(exit_rect, color, true)
-	draw_colored_polygon(PackedVector2Array([
-		Vector2(ROOM_SIZE.x - 36.0, ROOM_SIZE.y / 2.0 - 9.0),
-		Vector2(ROOM_SIZE.x - 25.0, ROOM_SIZE.y / 2.0),
-		Vector2(ROOM_SIZE.x - 36.0, ROOM_SIZE.y / 2.0 + 9.0)
-	]), Color("#d9f5c5"))
+	if level_index < LEVELS.size() - 1:
+		draw_rect(Rect2(ROOM_SIZE.x - 18.0, 112.0, 18.0, 48.0), color, true)
+	if level_index > 0:
+		draw_rect(Rect2(0.0, 112.0, 18.0, 48.0), color, true)
+	if enemy_health <= 0:
+		draw_colored_polygon(PackedVector2Array([
+			Vector2(ROOM_SIZE.x - 36.0, ROOM_SIZE.y / 2.0 - 9.0),
+			Vector2(ROOM_SIZE.x - 25.0, ROOM_SIZE.y / 2.0),
+			Vector2(ROOM_SIZE.x - 36.0, ROOM_SIZE.y / 2.0 + 9.0)
+		]), Color("#d9f5c5"))
+		if level_index > 0:
+			draw_colored_polygon(PackedVector2Array([
+				Vector2(36.0, ROOM_SIZE.y / 2.0 - 9.0),
+				Vector2(25.0, ROOM_SIZE.y / 2.0),
+				Vector2(36.0, ROOM_SIZE.y / 2.0 + 9.0)
+			]), Color("#d9f5c5"))
 
 func _draw_player() -> void:
 	var ant_color: Dictionary = ANT_COLORS[selected_ant]
@@ -736,12 +888,19 @@ func _draw_sprite(texture: Texture2D, center: Vector2, column: int, row: int, si
 	draw_texture_rect_region(texture, Rect2(center - size / 2.0, size), source)
 
 func _draw_hud() -> void:
-	_draw_meter(Vector2(22, 24), 104.0, 8.0, float(player_health) / float(player_max_health), Color("#8bf08b"))
+	var level: Dictionary = LEVELS[level_index]
+	draw_string(ThemeDB.fallback_font, Vector2(72, 18), "HEALTH", HORIZONTAL_ALIGNMENT_LEFT, 104, 8, Color("#d7ffc0"))
+	draw_string(ThemeDB.fallback_font, Vector2(354, 18), "POISON", HORIZONTAL_ALIGNMENT_LEFT, 104, 8, Color("#c4e7ff"))
+	_draw_meter(Vector2(72, 24), 104.0, 8.0, float(player_health) / float(player_max_health), Color("#8bf08b"))
 	_draw_meter(Vector2(354, 24), 104.0, 8.0, 1.0 if attack_cooldown <= 0.0 else 0.0, Color("#8bd5ff"))
 	for index in player_max_health:
-		draw_circle(Vector2(25.0 + index * 12.0, 49.0), 4.0, Color("#8bf08b") if index < player_health else Color("#49394f"))
+		draw_circle(Vector2(75.0 + index * 12.0, 49.0), 4.0, Color("#8bf08b") if index < player_health else Color("#49394f"))
+	draw_string(ThemeDB.fallback_font, Vector2(150, 19), level["name"], HORIZONTAL_ALIGNMENT_CENTER, 180, 9, Color("#fff0a6"))
+	draw_string(ThemeDB.fallback_font, Vector2(150, 30), level["enemy"] + " // " + level["quirk"], HORIZONTAL_ALIGNMENT_CENTER, 180, 7, Color("#d7ffc0", 0.8))
 	if enemy_health <= 0 and not run_complete:
-		draw_circle(Vector2(ROOM_SIZE.x - 30.0, ROOM_SIZE.y / 2.0), 8.0, Color("#9ee7a5", 0.8))
+		draw_string(ThemeDB.fallback_font, Vector2(0, 249), "TUNNELS UNLOCKED  //  EXPLORE THE ANTHILL", HORIZONTAL_ALIGNMENT_CENTER, 480, 8, Color("#9ee7a5"))
+	else:
+		draw_string(ThemeDB.fallback_font, Vector2(0, 249), "DEFEAT THE GUARD  //  TUNNELS LOCKED", HORIZONTAL_ALIGNMENT_CENTER, 480, 8, Color("#e8b6a4"))
 
 func _draw_meter(position: Vector2, width: float, height: float, ratio: float, fill: Color) -> void:
 	draw_rect(Rect2(position, Vector2(width, height)), Color("#17131c", 0.85), true)
@@ -785,4 +944,26 @@ func _draw_pause_menu() -> void:
 
 func _draw_state_overlay(color: Color) -> void:
 	draw_rect(Rect2(0, 0, ROOM_SIZE.x, ROOM_SIZE.y), Color("#17131c", 0.74), true)
-	draw_circle(Vector2(240, 132), 32.0 + sin(player_anim_time * 4.0) * 5.0, color)
+	draw_rect(Rect2(76, 48, 328, 176), Color("#211a2a", 0.96), true)
+	draw_rect(Rect2(76, 48, 328, 176), color, false, 2.0)
+
+func _draw_game_over_menu() -> void:
+	var progress := clampf(death_animation_time / DEATH_ANIMATION_DURATION, 0.0, 1.0)
+	var ui_shift := Vector2(240.0 - camera.position.x, 0.0)
+	draw_rect(Rect2(ui_shift, ROOM_SIZE), Color("#0d1018", 0.72), true)
+	draw_rect(Rect2(Vector2(62, 38) + ui_shift, Vector2(356, 196)), Color("#211a2a", 0.98), true)
+	draw_rect(Rect2(Vector2(62, 38) + ui_shift, Vector2(356, 196)), Color("#d85b7d", 0.9), false, 2.0)
+	draw_line(Vector2(82, 77) + ui_shift, Vector2(398, 77) + ui_shift, Color("#6a3b55"), 1.0)
+	draw_string(ThemeDB.fallback_font, Vector2(0, 69) + ui_shift, "COLONY LOST", HORIZONTAL_ALIGNMENT_CENTER, 480, 22, Color("#ff9a9f"))
+	draw_string(ThemeDB.fallback_font, Vector2(0, 94) + ui_shift, "THE GUARD REACHED YOUR NEST", HORIZONTAL_ALIGNMENT_CENTER, 480, 9, Color("#f4d9ad"))
+	var pulse := 1.0 + sin(player_anim_time * 5.0) * 0.08
+	draw_circle(Vector2(240, 135) + ui_shift, 19.0 * pulse, Color("#d85b7d", 0.14))
+	draw_circle(Vector2(240, 135) + ui_shift, 11.0 * pulse, Color("#d85b7d", 0.26))
+	for shard_index in 7:
+		var angle := float(shard_index) * TAU / 7.0 + player_anim_time * 0.35
+		var distance := 22.0 + progress * 18.0
+		var shard_start := Vector2(240, 135) + ui_shift + Vector2.RIGHT.rotated(angle) * distance
+		var shard_end := shard_start + Vector2.RIGHT.rotated(angle) * (8.0 + progress * 7.0)
+		draw_line(shard_start, shard_end, Color("#ff9a9f", 0.75 - progress * 0.3), 2.0)
+	draw_string(ThemeDB.fallback_font, Vector2(0, 184) + ui_shift, "R  RESTART RUN", HORIZONTAL_ALIGNMENT_CENTER, 480, 11, Color("#d7ffc0"))
+	draw_string(ThemeDB.fallback_font, Vector2(0, 202) + ui_shift, "ESC  RETURN TO MAIN MENU", HORIZONTAL_ALIGNMENT_CENTER, 480, 9, Color("#b99bbd"))
